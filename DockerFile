@@ -1,0 +1,37 @@
+FROM golang:1.22-alpine AS builder
+
+# Install dependencies needed for protoc-gen-go if generating proto in CI
+RUN apk add --no-cache git ca-certificates tzdata
+
+WORKDIR /app
+
+# Cache dependency downloads separately from source
+COPY go.mod go.sum ./
+RUN go mod download && go mod verify
+
+# Copy source and build a fully static binary
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -ldflags="-s -w" -trimpath -o /price-fetcher .
+
+FROM scratch
+
+# Carry over TLS certs and timezone data from builder
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+COPY --from=builder /price-fetcher /price-fetcher
+
+EXPOSE 3000
+
+# Labels for image metadata
+LABEL org.opencontainers.image.title="price-fetcher" \
+      org.opencontainers.image.source="https://github.com/PIXELL07/price-fetcher" \
+      org.opencontainers.image.description="Crypto price fetcher service" \
+      org.opencontainers.image.version="1.0.0"
+
+# Healthcheck hits the /tickers endpoint 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD ["/price-fetcher", "-healthcheck"] || exit 1
+
+ENTRYPOINT ["/price-fetcher"]
+CMD ["-listenaddr=:3000"]
