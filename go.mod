@@ -1,4 +1,4 @@
-module price-fetcher
+module github.com/PIXELL07/price-fetcher
 
 go 1.25.4
 
